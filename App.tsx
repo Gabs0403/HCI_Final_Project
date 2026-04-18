@@ -1,8 +1,17 @@
 import { StatusBar } from 'expo-status-bar';
 import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { AuthProvider } from '@/contexts/AuthContext';
 
 export default function App() {
+  return (
+    <AuthProvider>
+      <Welcome />
+    </AuthProvider>
+  );
+}
+
+function Welcome() {
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar style="light" />
@@ -48,7 +57,7 @@ export default function App() {
       </View>
 
       {/* Footer */}
-      <Text style={styles.footer}>FGCU · HCI Project · 2025</Text>
+      <Text style={styles.footer}>FGCU · HCI Project · 2026</Text>
     </SafeAreaView>
   );
 }
