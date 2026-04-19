@@ -1,13 +1,15 @@
 import { StatusBar } from 'expo-status-bar';
 import { Text, View, StyleSheet, TouchableOpacity } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { AuthProvider } from '@/contexts/AuthContext';
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Welcome />
-    </AuthProvider>
+    <SafeAreaProvider>
+      <AuthProvider>
+        <Welcome />
+      </AuthProvider>
+    </SafeAreaProvider>
   );
 }
 
