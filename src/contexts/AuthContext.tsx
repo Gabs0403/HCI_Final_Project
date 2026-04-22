@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useRef, useState, ReactNode } from 'react';
 import { Session } from '@supabase/supabase-js';
 import { supabase } from '@/lib/supabase';
 import { UserProfile } from '@/types';
@@ -11,6 +11,7 @@ interface AuthContextValue {
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string, fullName: string) => Promise<void>;
   signOut: () => Promise<void>;
+  clearPendingConfirmation: () => void;
 }
 
 const noop = async () => {
@@ -25,6 +26,7 @@ const defaultValue: AuthContextValue = {
   signIn: noop,
   signUp: noop,
   signOut: noop,
+  clearPendingConfirmation: () => {},
 };
 
 const AuthContext = createContext<AuthContextValue>(defaultValue);
@@ -74,8 +76,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const userId = session?.user.id ?? null;
+  const currentUserIdRef = useRef<string | null>(null);
 
   useEffect(() => {
+    currentUserIdRef.current = userId;
     if (!userId) return;
     let cancelled = false;
     setLoading(true);
@@ -86,12 +90,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           supabase.from('user').select('*').eq('id', userId).single(),
           PROFILE_FETCH_TIMEOUT_MS,
         );
-        if (cancelled) return;
+        if (cancelled || currentUserIdRef.current !== userId) return;
 
         if (error) {
           if (error.code === 'PGRST116' && attempt < PROFILE_MAX_RETRIES) {
             await new Promise(r => setTimeout(r, PROFILE_RETRY_DELAY_MS));
-            if (cancelled) return;
+            if (cancelled || currentUserIdRef.current !== userId) return;
             return fetchProfile(attempt + 1);
           }
           console.warn('Failed to load user profile', error.message);
@@ -100,11 +104,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setUserProfile(data as UserProfile);
         }
       } catch (err) {
-        if (cancelled) return;
+        if (cancelled || currentUserIdRef.current !== userId) return;
         console.warn('Profile fetch error', err);
         setUserProfile(null);
       } finally {
-        if (!cancelled) setLoading(false);
+        if (!cancelled && currentUserIdRef.current === userId) setLoading(false);
       }
     };
 
@@ -136,9 +140,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setPendingConfirmation(false);
   };
 
+  const clearPendingConfirmation = () => setPendingConfirmation(false);
+
   return (
     <AuthContext.Provider
-      value={{ session, userProfile, loading, pendingConfirmation, signIn, signUp, signOut }}
+      value={{ session, userProfile, loading, pendingConfirmation, signIn, signUp, signOut, clearPendingConfirmation }}
     >
       {children}
     </AuthContext.Provider>

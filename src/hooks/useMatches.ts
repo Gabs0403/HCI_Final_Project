@@ -84,53 +84,12 @@ export function useMatches(tournamentId: string) {
     winnerId: string,
     score: string
   ): Promise<{ error: string | null }> => {
-    const { error } = await supabase
-      .from('match')
-      .update({ winner_id: winnerId, score, status: 'completed' })
-      .eq('id', matchId);
-
+    const { error } = await supabase.rpc('complete_match', {
+      match_id: matchId,
+      winner_id: winnerId,
+      score,
+    });
     if (error) return { error: error.message };
-
-    const currentMatch = matches.find(m => m.id === matchId);
-    let nextMatchId: string | null = null;
-    let isPlayer1Slot = false;
-
-    if (currentMatch) {
-      const nextRound = currentMatch.round + 1;
-      const nextMatchNumber = Math.ceil(currentMatch.match_number / 2);
-      isPlayer1Slot = currentMatch.match_number % 2 === 1;
-      const nextMatch = matches.find(m => m.round === nextRound && m.match_number === nextMatchNumber);
-
-      if (nextMatch) {
-        nextMatchId = nextMatch.id;
-        const field = isPlayer1Slot ? 'player1_id' : 'player2_id';
-        await supabase.from('match').update({ [field]: winnerId }).eq('id', nextMatch.id);
-      }
-    }
-
-    setMatches(prev =>
-      prev.map(m => {
-        if (m.id === matchId) {
-          const winner = m.player1?.id === winnerId ? m.player1 : m.player2?.id === winnerId ? m.player2 : null;
-          return { ...m, winner_id: winnerId, score, status: 'completed' as const, winner };
-        }
-        if (nextMatchId && m.id === nextMatchId) {
-          const completedMatch = prev.find(x => x.id === matchId);
-          const winnerProfile = completedMatch?.player1?.id === winnerId
-            ? completedMatch.player1
-            : completedMatch?.player2?.id === winnerId ? completedMatch.player2 : null;
-          return {
-            ...m,
-            player1_id: isPlayer1Slot ? winnerId : m.player1_id,
-            player2_id: isPlayer1Slot ? m.player2_id : winnerId,
-            player1: isPlayer1Slot ? (winnerProfile ?? null) : m.player1,
-            player2: isPlayer1Slot ? m.player2 : (winnerProfile ?? null),
-          };
-        }
-        return m;
-      })
-    );
-
     return { error: null };
   };
 
