@@ -365,3 +365,237 @@ WHERE u.role = 'admin'
   AND NOT EXISTS (SELECT 1 FROM tournament WHERE name = 'FGCU Spring Open')
 ORDER BY u.created_at ASC
 LIMIT 1;
+
+
+-- ── Realtime publication ─────────────────────────────────────
+-- Supabase's realtime service only streams row changes for tables in the
+-- supabase_realtime publication. useMatches / useTournaments subscribe via
+-- supabase.channel().on('postgres_changes', ...); without this statement
+-- those subscriptions silently receive no events.
+
+ALTER PUBLICATION supabase_realtime ADD TABLE tournament, registration, match;
+
+
+-- ── RPC: complete_match ──────────────────────────────────────
+-- Admin-only atomic match completion: marks the current match completed
+-- and slots the winner into the correct half of the next-round match in
+-- one transaction. Replaces two separate client UPDATEs (see
+-- src/hooks/useMatches.ts updateMatchResult) which could leave the bracket
+-- partially advanced if the network dropped between them.
+--
+-- Match pairing rule (single elimination): next_round = round + 1,
+-- next_match_number = ceil(match_number / 2). Odd match_number → winner
+-- occupies player1 slot of the next match; even → player2 slot.
+
+CREATE OR REPLACE FUNCTION complete_match(
+  match_id   UUID,
+  winner_id  UUID,
+  score      TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  cur_tournament UUID;
+  cur_round      INT;
+  cur_number     INT;
+  cur_p1         UUID;
+  cur_p2         UUID;
+  next_number    INT;
+  next_slot      TEXT;
+BEGIN
+  IF NOT is_admin() THEN
+    RAISE EXCEPTION 'Only admins can complete matches' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT tournament_id, round, match_number, player1_id, player2_id
+    INTO cur_tournament, cur_round, cur_number, cur_p1, cur_p2
+    FROM match
+   WHERE id = match_id
+   FOR UPDATE;
+
+  IF cur_tournament IS NULL THEN
+    RAISE EXCEPTION 'Match not found' USING ERRCODE = 'P0002';
+  END IF;
+
+  IF winner_id IS DISTINCT FROM cur_p1 AND winner_id IS DISTINCT FROM cur_p2 THEN
+    RAISE EXCEPTION 'Winner must be one of the match players' USING ERRCODE = '23514';
+  END IF;
+
+  UPDATE match
+     SET winner_id = complete_match.winner_id,
+         score     = complete_match.score,
+         status    = 'completed'
+   WHERE id = match_id;
+
+  next_number := CEIL(cur_number::numeric / 2);
+  next_slot   := CASE WHEN cur_number % 2 = 1 THEN 'player1_id' ELSE 'player2_id' END;
+
+  IF next_slot = 'player1_id' THEN
+    UPDATE match
+       SET player1_id = complete_match.winner_id
+     WHERE tournament_id = cur_tournament
+       AND round         = cur_round + 1
+       AND match_number  = next_number;
+  ELSE
+    UPDATE match
+       SET player2_id = complete_match.winner_id
+     WHERE tournament_id = cur_tournament
+       AND round         = cur_round + 1
+       AND match_number  = next_number;
+  END IF;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION complete_match(UUID, UUID, TEXT) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION complete_match(UUID, UUID, TEXT) TO authenticated;
+
+
+-- ── RPC: generate_bracket ────────────────────────────────────
+-- Admin-only atomic single-elimination bracket generator. Mirrors the
+-- previous client algorithm (PlayerManagementScreen's buildMatchSlots):
+-- byes are paired with real-match winners in round 2 so no two byes
+-- meet in round 1. Wrapping it here guarantees all N matches are
+-- inserted atomically — a network drop mid-generation no longer leaves
+-- a half-built bracket.
+--
+-- Regeneration is supported: any existing matches for the tournament
+-- are deleted first, within the same transaction.
+--
+-- Returns: total number of matches inserted.
+
+CREATE OR REPLACE FUNCTION generate_bracket(tournament_id UUID)
+RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  n               INT;
+  b               INT;
+  num_rounds      INT;
+  r1_slot_count   INT;
+  num_r1_matches  INT;
+  player_ids      UUID[];
+  r1_players      UUID[];
+  bye_players     UUID[];
+  ri              INT;
+  bi              INT;
+  s               INT;
+  slot_kinds      TEXT[];
+  slot_p1         UUID[];
+  slot_p2         UUID[];
+  round_idx       INT;
+  match_count     INT;
+  match_num       INT;
+  next_match      INT;
+  r2_p1           UUID[];
+  r2_p2           UUID[];
+  inserted        INT := 0;
+BEGIN
+  IF NOT is_admin() THEN
+    RAISE EXCEPTION 'Only admins can generate brackets' USING ERRCODE = '42501';
+  END IF;
+
+  SELECT ARRAY(
+    SELECT player_id
+      FROM registration
+     WHERE registration.tournament_id = generate_bracket.tournament_id
+     ORDER BY random()
+  ) INTO player_ids;
+
+  n := COALESCE(array_length(player_ids, 1), 0);
+  IF n < 2 THEN
+    RAISE EXCEPTION 'Need at least 2 registered players (have %)', n
+      USING ERRCODE = 'P0002';
+  END IF;
+
+  -- Clear any existing bracket for this tournament.
+  DELETE FROM match WHERE match.tournament_id = generate_bracket.tournament_id;
+
+  -- b = smallest power of 2 >= n
+  b := 2;
+  WHILE b < n LOOP b := b * 2; END LOOP;
+  num_rounds     := (ln(b) / ln(2))::INT;
+  r1_slot_count  := b / 2;
+  num_r1_matches := GREATEST(n - r1_slot_count, 0);
+
+  r1_players  := player_ids[1 : num_r1_matches * 2];
+  bye_players := player_ids[num_r1_matches * 2 + 1 : n];
+
+  slot_kinds := ARRAY[]::TEXT[];
+  slot_p1    := ARRAY[]::UUID[];
+  slot_p2    := ARRAY[]::UUID[];
+  ri := 0;
+  bi := 0;
+
+  FOR s IN 1..r1_slot_count LOOP
+    IF s % 2 = 0 AND bi < COALESCE(array_length(bye_players, 1), 0) THEN
+      bi := bi + 1;
+      slot_kinds := array_append(slot_kinds, 'bye');
+      slot_p1    := array_append(slot_p1, bye_players[bi]);
+      slot_p2    := array_append(slot_p2, NULL::UUID);
+    ELSIF ri < num_r1_matches THEN
+      slot_kinds := array_append(slot_kinds, 'real');
+      slot_p1    := array_append(slot_p1, r1_players[ri * 2 + 1]);
+      slot_p2    := array_append(slot_p2, r1_players[ri * 2 + 2]);
+      ri := ri + 1;
+    ELSE
+      bi := bi + 1;
+      slot_kinds := array_append(slot_kinds, 'bye');
+      slot_p1    := array_append(slot_p1, bye_players[bi]);
+      slot_p2    := array_append(slot_p2, NULL::UUID);
+    END IF;
+  END LOOP;
+
+  -- Round 1: insert one DB row per real match, using the virtual slot
+  -- number as match_number so the ceil(match_number/2) advancement rule
+  -- still lines up with the round-2 preseeding below.
+  FOR s IN 1..r1_slot_count LOOP
+    IF slot_kinds[s] = 'real' THEN
+      INSERT INTO match (tournament_id, round, match_number, player1_id, player2_id, status)
+      VALUES (generate_bracket.tournament_id, 1, s, slot_p1[s], slot_p2[s], 'pending');
+      inserted := inserted + 1;
+    END IF;
+  END LOOP;
+
+  -- Round 2 preseeding + rounds 2..N
+  IF num_rounds >= 2 THEN
+    r2_p1 := ARRAY_FILL(NULL::UUID, ARRAY[b / 4]);
+    r2_p2 := ARRAY_FILL(NULL::UUID, ARRAY[b / 4]);
+
+    FOR s IN 1..r1_slot_count LOOP
+      IF slot_kinds[s] = 'bye' THEN
+        next_match := CEIL(s::numeric / 2)::INT;
+        IF s % 2 = 1 THEN
+          r2_p1[next_match] := slot_p1[s];
+        ELSE
+          r2_p2[next_match] := slot_p1[s];
+        END IF;
+      END IF;
+    END LOOP;
+
+    FOR round_idx IN 2..num_rounds LOOP
+      match_count := (b / (2 ^ round_idx))::INT;
+      FOR match_num IN 1..match_count LOOP
+        IF round_idx = 2 THEN
+          INSERT INTO match (tournament_id, round, match_number, player1_id, player2_id, status)
+          VALUES (generate_bracket.tournament_id, round_idx, match_num,
+                  r2_p1[match_num], r2_p2[match_num], 'pending');
+        ELSE
+          INSERT INTO match (tournament_id, round, match_number, player1_id, player2_id, status)
+          VALUES (generate_bracket.tournament_id, round_idx, match_num, NULL, NULL, 'pending');
+        END IF;
+        inserted := inserted + 1;
+      END LOOP;
+    END LOOP;
+  END IF;
+
+  RETURN inserted;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION generate_bracket(UUID) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION generate_bracket(UUID) TO authenticated;

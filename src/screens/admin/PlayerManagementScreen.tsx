@@ -22,93 +22,6 @@ const PAYMENT_COLORS: Record<PaymentStatus, { bg: string; text: string }> = {
   refunded: { bg: '#f1f5f9', text: '#475569' },
 };
 
-// ── Bracket generation ────────────────────────────────────────────────────────
-
-function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function buildMatchSlots(playerIds: string[], tournamentId: string) {
-  const n = playerIds.length;
-  const B = Math.pow(2, Math.ceil(Math.log2(Math.max(n, 2))));
-  const numRounds = Math.log2(B);
-  const r1SlotCount = B / 2;
-  const numR1Matches = n - r1SlotCount;
-  const seeded = shuffle(playerIds);
-  const r1Players = seeded.slice(0, numR1Matches * 2);
-  const byePlayers = seeded.slice(numR1Matches * 2);
-
-  // Assign B/2 virtual round-1 slots, interleaving real matches (odd slots) and
-  // bye players (even slots) so that byes are paired with real-match winners in
-  // round 2 instead of facing each other immediately.
-  type VSlot = { kind: 'real'; p1: string; p2: string } | { kind: 'bye'; player: string };
-  const virtualSlots: VSlot[] = [];
-  let ri = 0, bi = 0;
-  for (let s = 1; s <= r1SlotCount; s++) {
-    if (s % 2 === 0 && bi < byePlayers.length) {
-      virtualSlots.push({ kind: 'bye', player: byePlayers[bi++] });
-    } else if (ri < numR1Matches) {
-      virtualSlots.push({ kind: 'real', p1: r1Players[ri * 2], p2: r1Players[ri * 2 + 1] });
-      ri++;
-    } else {
-      virtualSlots.push({ kind: 'bye', player: byePlayers[bi++] });
-    }
-  }
-
-  const slots: {
-    tournament_id: string; round: number; match_number: number;
-    player1_id: string | null; player2_id: string | null;
-    winner_id: null; score: null; status: 'pending'; scheduled_at: null;
-  }[] = [];
-
-  // Round 1: one DB record per real match, using its virtual slot number as
-  // match_number so the advancement formula (ceil(match_number/2)) still works.
-  for (let s = 0; s < r1SlotCount; s++) {
-    const slot = virtualSlots[s];
-    if (slot.kind === 'real') {
-      slots.push({
-        tournament_id: tournamentId, round: 1, match_number: s + 1,
-        player1_id: slot.p1, player2_id: slot.p2,
-        winner_id: null, score: null, status: 'pending', scheduled_at: null,
-      });
-    }
-  }
-
-  // Pre-seed round 2 from bye virtual slots
-  const r2pre: Record<number, { p1?: string; p2?: string }> = {};
-  for (let s = 0; s < r1SlotCount; s++) {
-    const slot = virtualSlots[s];
-    if (slot.kind === 'bye') {
-      const vNum = s + 1;
-      const nextMatch = Math.ceil(vNum / 2);
-      if (!r2pre[nextMatch]) r2pre[nextMatch] = {};
-      if (vNum % 2 === 1) r2pre[nextMatch].p1 = slot.player;
-      else               r2pre[nextMatch].p2 = slot.player;
-    }
-  }
-
-  // Round 2+
-  for (let round = 2; round <= numRounds; round++) {
-    const matchCount = B / Math.pow(2, round);
-    for (let i = 0; i < matchCount; i++) {
-      const mn = i + 1;
-      const pre = round === 2 ? (r2pre[mn] ?? {}) : {};
-      slots.push({
-        tournament_id: tournamentId, round, match_number: mn,
-        player1_id: pre.p1 ?? null, player2_id: pre.p2 ?? null,
-        winner_id: null, score: null, status: 'pending', scheduled_at: null,
-      });
-    }
-  }
-
-  return slots;
-}
-
 // ── Screen ────────────────────────────────────────────────────────────────────
 
 export function PlayerManagementScreen({ route, navigation }: Props) {
@@ -273,28 +186,15 @@ export function PlayerManagementScreen({ route, navigation }: Props) {
 
   const generateBracket = async () => {
     setGenerating(true);
-    const playerIds = registrations.map(r => r.player_id);
-    const slots = buildMatchSlots(playerIds, tournamentId);
-
-    const { error: deleteError } = await supabase
-      .from('match')
-      .delete()
-      .eq('tournament_id', tournamentId);
-
-    if (deleteError) {
-      setGenerating(false);
-      Alert.alert('Error', 'Could not clear previous bracket: ' + deleteError.message);
-      return;
-    }
-
-    const { error } = await supabase.from('match').insert(slots);
-
+    const { data, error } = await supabase.rpc('generate_bracket', {
+      tournament_id: tournamentId,
+    });
     setGenerating(false);
     if (error) {
       Alert.alert('Error', error.message);
     } else {
       setBracketExists(true);
-      Alert.alert('Bracket Generated! 🎾', `${slots.length} matches created.`, [
+      Alert.alert('Bracket Generated! 🎾', `${data ?? 0} matches created.`, [
         { text: 'View Results', onPress: () => navigation.navigate('MatchResult', { tournamentId, tournamentName }) },
         { text: 'OK' },
       ]);

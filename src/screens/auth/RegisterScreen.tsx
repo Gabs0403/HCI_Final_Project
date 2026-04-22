@@ -8,11 +8,12 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthStackParamList } from '@/navigation/AuthNavigator';
+import { getAuthErrorMessage } from '@/lib/errors';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Register'>;
 
 export function RegisterScreen({ navigation }: Props) {
-  const { signUp, pendingConfirmation } = useAuth();
+  const { signUp, pendingConfirmation, clearPendingConfirmation } = useAuth();
   const [fullName, setFullName]   = useState('');
   const [email, setEmail]         = useState('');
   const [password, setPassword]   = useState('');
@@ -36,8 +37,8 @@ export function RegisterScreen({ navigation }: Props) {
     setLoading(true);
     try {
       await signUp(email.trim().toLowerCase(), password, fullName.trim());
-    } catch (err: any) {
-      Alert.alert('Registration Failed', err.message ?? 'Something went wrong. Please try again.');
+    } catch (err) {
+      Alert.alert('Registration Failed', getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -57,7 +58,10 @@ export function RegisterScreen({ navigation }: Props) {
           </Text>
           <TouchableOpacity
             style={styles.backBtn}
-            onPress={() => navigation.navigate('Login')}
+            onPress={() => {
+              clearPendingConfirmation();
+              navigation.navigate('Login');
+            }}
             accessibilityRole="button"
             accessibilityLabel="Back to sign in"
           >

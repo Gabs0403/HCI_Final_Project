@@ -1,13 +1,11 @@
-import { useEffect, useState } from 'react';
 import {
     View, Text, ScrollView, TouchableOpacity,
-    StyleSheet, ActivityIndicator, Alert,
+    StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { supabase } from '@/lib/supabase';
-import { useAuth } from '@/contexts/AuthContext';
 import { useTournament } from '@/hooks/useTournaments';
+import { useIsRegistered } from '@/hooks/useRegistration';
 import { PlayerStackParamList } from '@/navigation/PlayerNavigator';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
@@ -19,24 +17,8 @@ const SURFACE_EMOJI: Record<string, string> = {
 
 export function TournamentDetailScreen({ route, navigation }: Props) {
     const { tournamentId } = route.params;
-    const { userProfile } = useAuth();
     const { data: tournament, loading } = useTournament(tournamentId);
-    const [alreadyRegistered, setAlreadyRegistered] = useState(false);
-    const [checkingReg, setCheckingReg] = useState(true);
-
-    useEffect(() => {
-        if (!userProfile?.id) { setCheckingReg(false); return; }
-        supabase
-            .from('registration')
-            .select('id')
-            .eq('tournament_id', tournamentId)
-            .eq('player_id', userProfile.id)
-            .maybeSingle()
-            .then(({ data }) => {
-                setAlreadyRegistered(!!data);
-                setCheckingReg(false);
-            });
-    }, [tournamentId, userProfile?.id]);
+    const { registered: alreadyRegistered, loading: checkingReg } = useIsRegistered(tournamentId);
 
     if (loading) return <LoadingSpinner message="Loading tournament..." />;
     if (!tournament) return null;

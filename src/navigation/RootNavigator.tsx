@@ -17,8 +17,9 @@ const Stack = createNativeStackNavigator<RootStackParamList>();
 export function RootNavigator() {
     const { session, userProfile, loading } = useAuth();
 
-    // DEV ONLY — skip auth entirely when EXPO_PUBLIC_MOCK_MODE=true
-    if (process.env.EXPO_PUBLIC_MOCK_MODE === 'true') {
+    // DEV ONLY — skip auth entirely when EXPO_PUBLIC_MOCK_MODE=true.
+    // Gated by __DEV__ so production bundles strip this via dead-code elimination.
+    if (__DEV__ && process.env.EXPO_PUBLIC_MOCK_MODE === 'true') {
         return (
             <NavigationContainer>
                 <Stack.Navigator screenOptions={{ headerShown: false }}>
@@ -31,7 +32,8 @@ export function RootNavigator() {
     if (loading) return <LoadingSpinner message="Loading..." />;
 
     // DEV ONLY — set EXPO_PUBLIC_DEV_ADMIN_EMAIL in .env to force admin role locally.
-    const devAdminEmail = process.env.EXPO_PUBLIC_DEV_ADMIN_EMAIL;
+    // Gated by __DEV__ so production bundles never read the override.
+    const devAdminEmail = __DEV__ ? process.env.EXPO_PUBLIC_DEV_ADMIN_EMAIL : undefined;
     const isAdmin =
         userProfile?.role === 'admin' ||
         (!!devAdminEmail && session?.user.email === devAdminEmail);

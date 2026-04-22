@@ -8,6 +8,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useAuth } from '@/contexts/AuthContext';
 import { AuthStackParamList } from '@/navigation/AuthNavigator';
+import { getAuthErrorMessage } from '@/lib/errors';
 
 type Props = NativeStackScreenProps<AuthStackParamList, 'Login'>;
 
@@ -26,8 +27,8 @@ export function LoginScreen({ navigation }: Props) {
     setLoading(true);
     try {
       await signIn(email.trim().toLowerCase(), password);
-    } catch (err: any) {
-      Alert.alert('Sign In Failed', err.message ?? 'Please check your credentials and try again.');
+    } catch (err) {
+      Alert.alert('Sign In Failed', getAuthErrorMessage(err));
     } finally {
       setLoading(false);
     }

@@ -35,6 +35,19 @@ export function useTournaments(): FetchState<Tournament[]> {
     fetchAll();
   }, [fetchAll]);
 
+  useEffect(() => {
+    const channel = supabase
+      .channel('tournaments:list')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tournament' },
+        () => fetchAll(),
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [fetchAll]);
+
   return { data, loading, error, refetch: fetchAll };
 }
 
@@ -68,6 +81,20 @@ export function useTournament(id: string | null): FetchState<Tournament | null> 
   useEffect(() => {
     fetchOne();
   }, [fetchOne]);
+
+  useEffect(() => {
+    if (!id) return;
+    const channel = supabase
+      .channel(`tournament:${id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tournament', filter: `id=eq.${id}` },
+        () => fetchOne(),
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [id, fetchOne]);
 
   return { data, loading, error, refetch: fetchOne };
 }
