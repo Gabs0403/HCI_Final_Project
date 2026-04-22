@@ -5,9 +5,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
 import { PlayerStackParamList } from '@/navigation/PlayerNavigator';
+import { validateCardNumber, validateCvv, validateExpiry } from '@/lib/validation';
+import { useRegistration } from '@/hooks/useRegistration';
 
 type Props = NativeStackScreenProps<PlayerStackParamList, 'Payment'>;
 
@@ -23,6 +24,7 @@ function formatExpiry(val: string) {
 export function PaymentScreen({ route, navigation }: Props) {
     const { tournamentId, tournamentName, entryFee } = route.params;
     const { userProfile } = useAuth();
+    const { register } = useRegistration();
     const [loading, setLoading] = useState(false);
 
     const [card, setCard] = useState('');
@@ -31,10 +33,17 @@ export function PaymentScreen({ route, navigation }: Props) {
     const [name, setName] = useState(userProfile?.full_name ?? '');
 
     const validate = (): string | null => {
-        if (card.replace(/\s/g, '').length !== 16) return 'Enter a valid 16-digit card number.';
-        if (expiry.length !== 5)                   return 'Enter expiry as MM/YY.';
-        if (cvv.length < 3)                        return 'Enter a valid CVV.';
-        if (!name.trim())                          return 'Enter the cardholder name.';
+        const digits = card.replace(/\s/g, '');
+        const cardCheck = validateCardNumber(digits);
+        if (!cardCheck.valid) return cardCheck.error ?? 'Invalid card';
+
+        const expiryCheck = validateExpiry(expiry);
+        if (!expiryCheck.valid) return expiryCheck.error ?? 'Invalid expiry';
+
+        const cvvCheck = validateCvv(cvv);
+        if (!cvvCheck.valid) return cvvCheck.error ?? 'Invalid CVV';
+
+        if (!name.trim()) return 'Enter the cardholder name.';
         return null;
     };
 
@@ -43,31 +52,27 @@ export function PaymentScreen({ route, navigation }: Props) {
         if (err) { Alert.alert('Check your details', err); return; }
 
         setLoading(true);
-
-        // Insert registration — the DB trigger auto-sets payment_status='paid'
-        // and increments current_players. No manual update needed.
-        const { error } = await supabase.from('registration').insert({
-            tournament_id: tournamentId,
-            player_id: userProfile?.id,
-        });
-
+        const result = await register(tournamentId);
         setLoading(false);
 
-        if (error) {
-            if (error.code === '23505') {
-                // Already registered — just navigate forward
+        switch (result.status) {
+            case 'registered':
+            case 'already-registered':
                 navigation.replace('RegistrationConfirm', { tournamentId, tournamentName });
-            } else if (error.message.includes('not open for registration')) {
+                return;
+            case 'tournament-closed':
                 Alert.alert('Registration closed', 'This tournament is no longer accepting registrations.');
-            } else if (error.message.includes('full')) {
+                return;
+            case 'tournament-full':
                 Alert.alert('Tournament full', 'Sorry, this tournament just filled up.');
-            } else {
-                Alert.alert('Error', error.message);
-            }
-            return;
+                return;
+            case 'not-signed-in':
+                Alert.alert('Sign in required', 'Please sign in before registering.');
+                return;
+            case 'error':
+                Alert.alert('Error', result.message);
+                return;
         }
-
-        navigation.replace('RegistrationConfirm', { tournamentId, tournamentName });
     };
 
     return (

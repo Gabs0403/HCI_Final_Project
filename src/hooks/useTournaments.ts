@@ -64,14 +64,16 @@ export function useTournaments(): FetchState<Tournament[]> {
     fetchAll();
   }, [fetchAll]);
 
-  // Real-time: refetch on any tournament table change
   useEffect(() => {
     const channel = supabase
-      .channel('tournaments-rt')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'tournament' }, () => {
-        fetchAll();
-      })
+      .channel('tournaments:list')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tournament' },
+        () => fetchAll(),
+      )
       .subscribe();
+
     return () => { supabase.removeChannel(channel); };
   }, [fetchAll]);
 
@@ -114,6 +116,20 @@ export function useTournament(id: string | null): FetchState<Tournament | null> 
   }, [id]);
 
   useEffect(() => { fetchOne(); }, [fetchOne]);
+
+  useEffect(() => {
+    if (!id) return;
+    const channel = supabase
+      .channel(`tournament:${id}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'tournament', filter: `id=eq.${id}` },
+        () => fetchOne(),
+      )
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [id, fetchOne]);
 
   return { data, loading, error, refetch: fetchOne };
 }

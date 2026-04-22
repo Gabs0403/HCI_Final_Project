@@ -1,13 +1,14 @@
-import { useEffect, useState } from 'react';
 import {
     View, Text, ScrollView, TouchableOpacity,
     StyleSheet, ActivityIndicator,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { NativeStackScreenProps } from '@react-navigation/native-stack';
+import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/contexts/AuthContext';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useTournament } from '@/hooks/useTournaments';
+import { useIsRegistered } from '@/hooks/useRegistration';
 import { PlayerStackParamList } from '@/navigation/PlayerNavigator';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
