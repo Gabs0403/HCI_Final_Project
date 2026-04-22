@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
     View, Text, ScrollView, TouchableOpacity,
-    StyleSheet, ActivityIndicator, Alert,
+    StyleSheet, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -23,19 +23,26 @@ export function TournamentDetailScreen({ route, navigation }: Props) {
     const { data: tournament, loading } = useTournament(tournamentId);
     const [alreadyRegistered, setAlreadyRegistered] = useState(false);
     const [checkingReg, setCheckingReg] = useState(true);
+    const [bracketExists, setBracketExists] = useState(false);
 
     useEffect(() => {
         if (!userProfile?.id) { setCheckingReg(false); return; }
-        supabase
-            .from('registration')
-            .select('id')
-            .eq('tournament_id', tournamentId)
-            .eq('player_id', userProfile.id)
-            .maybeSingle()
-            .then(({ data }) => {
-                setAlreadyRegistered(!!data);
-                setCheckingReg(false);
-            });
+        Promise.all([
+            supabase
+                .from('registration')
+                .select('id')
+                .eq('tournament_id', tournamentId)
+                .eq('player_id', userProfile.id)
+                .maybeSingle(),
+            supabase
+                .from('match')
+                .select('id', { count: 'exact', head: true })
+                .eq('tournament_id', tournamentId),
+        ]).then(([regResult, matchResult]) => {
+            setAlreadyRegistered(!!regResult.data);
+            setBracketExists((matchResult.count ?? 0) > 0);
+            setCheckingReg(false);
+        });
     }, [tournamentId, userProfile?.id]);
 
     if (loading) return <LoadingSpinner message="Loading tournament..." />;
@@ -43,7 +50,11 @@ export function TournamentDetailScreen({ route, navigation }: Props) {
 
     const spotsLeft = tournament.max_players - tournament.current_players;
     const isFull = spotsLeft <= 0;
-    const canRegister = tournament.status === 'registration_open' && !isFull && !alreadyRegistered;
+    const canRegister =
+        tournament.status === 'registration_open' &&
+        !isFull &&
+        !alreadyRegistered &&
+        !bracketExists;
     const showBracket = tournament.status === 'in_progress' || tournament.status === 'completed';
 
     return (
@@ -121,6 +132,10 @@ export function TournamentDetailScreen({ route, navigation }: Props) {
                             </TouchableOpacity>
                         )}
                     </View>
+                ) : bracketExists ? (
+                    <View style={styles.closedBanner}>
+                        <Text style={styles.closedBannerText}>🔒 Registration closed — bracket generated</Text>
+                    </View>
                 ) : canRegister ? (
                     <TouchableOpacity
                         style={styles.registerBtn}
@@ -170,7 +185,7 @@ const styles = StyleSheet.create({
 
     section: { gap: 8 },
     sectionTitle: {
-        fontSize: 12, fontWeight: '700', color: '#94a3b8',
+        fontSize: 12, fontWeight: '700', color: '#64748b',
         textTransform: 'uppercase', letterSpacing: 1,
     },
     infoGrid: {
@@ -186,7 +201,7 @@ const styles = StyleSheet.create({
     infoRowLast: { borderBottomWidth: 0 },
     infoIcon: { fontSize: 18, width: 24, textAlign: 'center' },
     infoText: { flex: 1, gap: 1 },
-    infoLabel: { fontSize: 11, color: '#94a3b8', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+    infoLabel: { fontSize: 11, color: '#64748b', fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
     infoValue: { fontSize: 14, color: '#1e293b', fontWeight: '600' },
 
     rulesCard: {
@@ -217,6 +232,12 @@ const styles = StyleSheet.create({
     },
     registeredText: { fontSize: 14, fontWeight: '700', color: '#166534' },
     registeredLink: { fontSize: 13, color: '#0f4c81', fontWeight: '600' },
+
+    closedBanner: {
+        backgroundColor: '#fef9c3', borderRadius: 14,
+        padding: 16, alignItems: 'center',
+    },
+    closedBannerText: { fontSize: 14, fontWeight: '600', color: '#854d0e' },
 
     fullBanner: {
         backgroundColor: '#f1f5f9', borderRadius: 14,

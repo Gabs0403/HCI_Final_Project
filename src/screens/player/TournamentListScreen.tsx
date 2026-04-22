@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import {
     View, Text, FlatList, TouchableOpacity,
-    StyleSheet, RefreshControl,
+    StyleSheet, RefreshControl, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -11,6 +12,8 @@ import { useAuth } from '@/contexts/AuthContext';
 import { LoadingSpinner } from '@/components/LoadingSpinner';
 
 type Props = NativeStackScreenProps<PlayerStackParamList, 'TournamentList'>;
+
+type FilterKey = 'all' | TournamentStatus;
 
 const STATUS_COLORS: Record<TournamentStatus, { bg: string; text: string; label: string }> = {
     upcoming:          { bg: '#e0e7ff', text: '#3730a3', label: 'Upcoming' },
@@ -23,9 +26,22 @@ const SURFACE_EMOJI: Record<string, string> = {
     hard: '🔵', clay: '🟤', grass: '🟢', indoor: '⚪',
 };
 
+const FILTERS: { key: FilterKey; label: string }[] = [
+    { key: 'all',               label: 'All' },
+    { key: 'registration_open', label: 'Open' },
+    { key: 'upcoming',          label: 'Upcoming' },
+    { key: 'in_progress',       label: 'In Progress' },
+    { key: 'completed',         label: 'Completed' },
+];
+
 export function TournamentListScreen({ navigation }: Props) {
     const { data: tournaments, loading, refetch } = useTournaments();
     const { userProfile, signOut } = useAuth();
+    const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
+
+    const filtered = activeFilter === 'all'
+        ? tournaments
+        : tournaments.filter(t => t.status === activeFilter);
 
     const renderItem = ({ item }: { item: Tournament }) => {
         const status = STATUS_COLORS[item.status];
@@ -94,8 +110,31 @@ export function TournamentListScreen({ navigation }: Props) {
                 </TouchableOpacity>
             </View>
 
+            {/* Filter chips */}
+            <View style={styles.filterBar}>
+                <ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.filterScroll}
+                >
+                    {FILTERS.map(f => (
+                        <TouchableOpacity
+                            key={f.key}
+                            style={[styles.chip, activeFilter === f.key && styles.chipActive]}
+                            onPress={() => setActiveFilter(f.key)}
+                            accessibilityRole="button"
+                            accessibilityLabel={`Filter: ${f.label}`}
+                        >
+                            <Text style={[styles.chipText, activeFilter === f.key && styles.chipTextActive]}>
+                                {f.label}
+                            </Text>
+                        </TouchableOpacity>
+                    ))}
+                </ScrollView>
+            </View>
+
             <FlatList
-                data={tournaments}
+                data={filtered}
                 keyExtractor={t => t.id}
                 renderItem={renderItem}
                 contentContainerStyle={styles.list}
@@ -103,7 +142,9 @@ export function TournamentListScreen({ navigation }: Props) {
                 ListEmptyComponent={
                     <View style={styles.empty}>
                         <Text style={styles.emptyIcon}>🎾</Text>
-                        <Text style={styles.emptyText}>No tournaments available.</Text>
+                        <Text style={styles.emptyText}>
+                            {activeFilter === 'all' ? 'No tournaments available.' : `No ${FILTERS.find(f => f.key === activeFilter)?.label.toLowerCase()} tournaments.`}
+                        </Text>
                         <Text style={styles.emptySubText}>Check back soon!</Text>
                     </View>
                 }
@@ -124,6 +165,21 @@ const styles = StyleSheet.create({
     headerSub: { fontSize: 12, color: '#64748b', marginTop: 1 },
     signOutBtn: { paddingHorizontal: 12, paddingVertical: 8, minHeight: 44, justifyContent: 'center' },
     signOutText: { fontSize: 13, color: '#dc2626', fontWeight: '600' },
+
+    filterBar: {
+        backgroundColor: '#ffffff',
+        borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+    },
+    filterScroll: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+    chip: {
+        paddingHorizontal: 14, minHeight: 44, justifyContent: 'center',
+        borderRadius: 22, backgroundColor: '#f1f5f9',
+        borderWidth: 1.5, borderColor: '#e2e8f0',
+    },
+    chipActive: { backgroundColor: '#0f4c81', borderColor: '#0f4c81' },
+    chipText: { fontSize: 13, fontWeight: '600', color: '#475569' },
+    chipTextActive: { color: '#ffffff' },
+
     list: { padding: 16, gap: 12 },
     card: {
         backgroundColor: '#ffffff', borderRadius: 16, padding: 16, gap: 6,
@@ -148,5 +204,5 @@ const styles = StyleSheet.create({
     empty: { alignItems: 'center', marginTop: 80, gap: 8 },
     emptyIcon: { fontSize: 48 },
     emptyText: { fontSize: 16, fontWeight: '600', color: '#64748b' },
-    emptySubText: { fontSize: 13, color: '#94a3b8' },
+    emptySubText: { fontSize: 13, color: '#64748b' },
 });

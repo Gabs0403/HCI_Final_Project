@@ -3,10 +3,12 @@ import { AdminDashboardScreen } from '@/screens/admin/AdminDashboardScreen';
 import { PlayerManagementScreen } from '@/screens/admin/PlayerManagementScreen';
 import { MatchResultScreen } from '@/screens/admin/MatchResultScreen';
 import { CreateTournamentScreen } from '@/screens/admin/CreateTournamentScreen';
+import { EditTournamentScreen } from '@/screens/admin/EditTournamentScreen';
 
 export type AdminStackParamList = {
   AdminDashboard: undefined;
   CreateTournament: undefined;
+  EditTournament: { tournamentId: string; tournamentName: string };
   PlayerManagement: { tournamentId: string; tournamentName: string; tournamentStatus: string };
   MatchResult: { tournamentId: string; tournamentName: string };
 };
@@ -32,6 +34,11 @@ export function AdminNavigator() {
         name="CreateTournament"
         component={CreateTournamentScreen}
         options={{ title: 'New Tournament' }}
+      />
+      <Stack.Screen
+        name="EditTournament"
+        component={EditTournamentScreen}
+        options={({ route }) => ({ title: route.params.tournamentName })}
       />
       <Stack.Screen
         name="PlayerManagement"

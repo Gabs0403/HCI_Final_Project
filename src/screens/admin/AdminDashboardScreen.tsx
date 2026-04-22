@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   View, Text, FlatList, TouchableOpacity,
-  StyleSheet, Alert, RefreshControl,
+  StyleSheet, Alert, RefreshControl, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
@@ -12,6 +12,8 @@ import { AdminStackParamList } from '@/navigation/AdminNavigator';
 
 type Props = NativeStackScreenProps<AdminStackParamList, 'AdminDashboard'>;
 
+type FilterKey = 'all' | TournamentStatus;
+
 const STATUS_COLORS: Record<TournamentStatus, { bg: string; text: string; label: string }> = {
   upcoming:          { bg: '#e0e7ff', text: '#3730a3', label: 'Upcoming' },
   registration_open: { bg: '#dcfce7', text: '#166534', label: 'Open' },
@@ -19,10 +21,19 @@ const STATUS_COLORS: Record<TournamentStatus, { bg: string; text: string; label:
   completed:         { bg: '#f1f5f9', text: '#475569', label: 'Completed' },
 };
 
+const FILTERS: { key: FilterKey; label: string }[] = [
+  { key: 'all',               label: 'All' },
+  { key: 'registration_open', label: 'Open' },
+  { key: 'upcoming',          label: 'Upcoming' },
+  { key: 'in_progress',       label: 'In Progress' },
+  { key: 'completed',         label: 'Completed' },
+];
+
 export function AdminDashboardScreen({ navigation }: Props) {
   const { userProfile, signOut } = useAuth();
   const [tournaments, setTournaments] = useState<Tournament[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [activeFilter, setActiveFilter] = useState<FilterKey>('all');
 
   const fetchTournaments = async () => {
     const { data, error } = await supabase
@@ -48,13 +59,16 @@ export function AdminDashboardScreen({ navigation }: Props) {
     ]);
   };
 
+  const filtered = activeFilter === 'all'
+    ? tournaments
+    : tournaments.filter(t => t.status === activeFilter);
+
   const renderTournament = ({ item }: { item: Tournament }) => {
     const status = STATUS_COLORS[item.status];
     const spotsLeft = item.max_players - item.current_players;
 
     return (
       <View style={styles.card}>
-        {/* Header row */}
         <View style={styles.cardHeader}>
           <Text style={styles.cardTitle} numberOfLines={1}>{item.name}</Text>
           <View style={[styles.badge, { backgroundColor: status.bg }]}>
@@ -62,7 +76,6 @@ export function AdminDashboardScreen({ navigation }: Props) {
           </View>
         </View>
 
-        {/* Info row */}
         <Text style={styles.cardMeta}>
           📍 {item.location}{'   '}🎾 {item.surface}
         </Text>
@@ -74,7 +87,21 @@ export function AdminDashboardScreen({ navigation }: Props) {
         </Text>
         <Text style={styles.cardMeta}>💰 Entry fee: ${Number(item.entry_fee).toFixed(2)}</Text>
 
-        {/* Action buttons */}
+        <TouchableOpacity
+          style={styles.btnEdit}
+          activeOpacity={0.8}
+          accessibilityRole="button"
+          accessibilityLabel={`Edit ${item.name}`}
+          onPress={() =>
+            navigation.navigate('EditTournament', {
+              tournamentId: item.id,
+              tournamentName: item.name,
+            })
+          }
+        >
+          <Text style={styles.btnEditText}>✏️ Edit Tournament</Text>
+        </TouchableOpacity>
+
         <View style={styles.cardActions}>
           <TouchableOpacity
             style={styles.btnSecondary}
@@ -139,15 +166,42 @@ export function AdminDashboardScreen({ navigation }: Props) {
         <Text style={styles.createBtnText}>+ New Tournament</Text>
       </TouchableOpacity>
 
+      {/* Filter chips */}
+      <View style={styles.filterBar}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterScroll}
+        >
+          {FILTERS.map(f => (
+            <TouchableOpacity
+              key={f.key}
+              style={[styles.chip, activeFilter === f.key && styles.chipActive]}
+              onPress={() => setActiveFilter(f.key)}
+              accessibilityRole="button"
+              accessibilityLabel={`Filter: ${f.label}`}
+            >
+              <Text style={[styles.chipText, activeFilter === f.key && styles.chipTextActive]}>
+                {f.label}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </View>
+
       <FlatList
-        data={tournaments}
+        data={filtered}
         keyExtractor={t => t.id}
         renderItem={renderTournament}
         contentContainerStyle={styles.list}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
         ListEmptyComponent={
           <View style={styles.empty}>
-            <Text style={styles.emptyText}>No tournaments yet.</Text>
+            <Text style={styles.emptyText}>
+              {activeFilter === 'all'
+                ? 'No tournaments yet.'
+                : `No ${FILTERS.find(f => f.key === activeFilter)?.label.toLowerCase()} tournaments.`}
+            </Text>
           </View>
         }
       />
@@ -179,6 +233,20 @@ const styles = StyleSheet.create({
   },
   createBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
 
+  filterBar: {
+    borderBottomWidth: 1, borderBottomColor: '#e2e8f0',
+    marginTop: 10,
+  },
+  filterScroll: { paddingHorizontal: 12, paddingVertical: 10, gap: 8 },
+  chip: {
+    paddingHorizontal: 14, minHeight: 44, justifyContent: 'center',
+    borderRadius: 22, backgroundColor: '#f1f5f9',
+    borderWidth: 1.5, borderColor: '#e2e8f0',
+  },
+  chipActive: { backgroundColor: '#0f4c81', borderColor: '#0f4c81' },
+  chipText: { fontSize: 13, fontWeight: '600', color: '#475569' },
+  chipTextActive: { color: '#ffffff' },
+
   list: { padding: 16, gap: 12 },
 
   card: {
@@ -209,6 +277,13 @@ const styles = StyleSheet.create({
     borderRadius: 10, alignItems: 'center', justifyContent: 'center',
   },
   btnSecondaryText: { color: '#0f4c81', fontWeight: '600', fontSize: 14 },
+
+  btnEdit: {
+    height: 40, backgroundColor: '#f8fafc',
+    borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1.5, borderColor: '#e2e8f0', marginTop: 4,
+  },
+  btnEditText: { color: '#475569', fontWeight: '600', fontSize: 13 },
 
   empty: { alignItems: 'center', marginTop: 60 },
   emptyText: { fontSize: 15, color: '#64748b' },

@@ -218,7 +218,7 @@ const styles = StyleSheet.create({
     demoNoticeText: { fontSize: 12, color: '#854d0e', fontWeight: '600', textAlign: 'center' },
 
     sectionTitle: {
-        fontSize: 12, fontWeight: '700', color: '#94a3b8',
+        fontSize: 12, fontWeight: '700', color: '#64748b',
         textTransform: 'uppercase', letterSpacing: 1,
     },
     formCard: {
@@ -245,5 +245,5 @@ const styles = StyleSheet.create({
     payBtnDisabled: { opacity: 0.6 },
     payBtnText: { color: '#fff', fontSize: 16, fontWeight: '800' },
 
-    secureNote: { textAlign: 'center', fontSize: 12, color: '#94a3b8', marginBottom: 8 },
+    secureNote: { textAlign: 'center', fontSize: 12, color: '#64748b', marginBottom: 8 },
 });
