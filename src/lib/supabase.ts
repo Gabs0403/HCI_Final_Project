@@ -5,7 +5,8 @@ import { createClient, SupabaseClient } from '@supabase/supabase-js';
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const key = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
 
-export const isSupabaseConfigured = Boolean(url && key);
+export const isMockMode = process.env.EXPO_PUBLIC_MOCK_MODE === 'true';
+export const isSupabaseConfigured = Boolean(url && key) && !isMockMode;
 
 if (!isSupabaseConfigured) {
   console.error(
@@ -23,7 +24,7 @@ export const supabase: SupabaseClient = createClient(
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
-      flowType: 'pkce',
+      flowType: 'implicit',
     },
   },
 );
